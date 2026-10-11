@@ -1,0 +1,413 @@
+* {
+  padding: 0%;
+  margin: 0%;
+  box-sizing: border-box;
+}
+
+
+html, body {
+  width: 100%;
+  height: 100%;
+  font-family: "Scoutie Sans", sans-serif;
+  overflow: hidden;
+}
+
+.webgl {
+  position: fixed;
+  top: 0;
+  left: 0;
+  outline: none;
+}
+
+.main {
+  position: relative;
+  padding: 10px;
+  pointer-events: none;
+}
+
+/* ------------------------------------------------------------------------------------
+   Control panel (lil-gui), restyled as a light frosted-glass panel at the top right:
+   monospace type, dark grey text, sub-groups in slightly darker bands, thin slider
+   tracks with capsule handles and values in rounded pills. Only its appearance changes
+   here: every control is the original lil-gui input.
+   ------------------------------------------------------------------------------------ */
+body .lil-gui {
+  --background-color: transparent;
+  --text-color: #3b3e3b;
+  --title-background-color: transparent;
+  --title-text-color: #2a2c2a;
+  --widget-color: rgba(30, 34, 30, 0.1);
+  --hover-color: rgba(30, 34, 30, 0.15);
+  --focus-color: rgba(30, 34, 30, 0.2);
+  --number-color: #3b3e3b;
+  --string-color: #3b3e3b;
+  --ink: #3e423e;
+  --font-size: 11px;
+  --input-font-size: 11px;
+  --font-family: "JetBrains Mono", ui-monospace, "Cascadia Mono", Consolas, Menlo, monospace;
+  --font-family-mono: "JetBrains Mono", ui-monospace, "Cascadia Mono", Consolas, Menlo, monospace;
+  --padding: 14px;
+  --spacing: 6px;
+  --widget-height: 22px;
+  --name-width: 40%;
+  --slider-input-width: 22%;
+  --slider-input-min-width: 44px;
+  --color-input-width: 30%;
+  --color-input-min-width: 64px;
+  --widget-border-radius: 6px;
+  --scrollbar-width: 4px;
+}
+
+/* The frosted glass surface */
+body .lil-gui.root.autoPlace {
+  --width: 280px;
+  position: fixed;
+  top: max(12px, env(safe-area-inset-top));
+  right: max(12px, env(safe-area-inset-right));
+  left: auto;
+  bottom: auto;
+  max-height: calc(100dvh - 24px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  border-radius: 10px;
+  overflow: hidden;
+  background: rgba(228, 230, 226, 0.66);
+  -webkit-backdrop-filter: blur(14px) saturate(60%);
+  backdrop-filter: blur(14px) saturate(60%);
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  box-shadow: 0 12px 32px -10px rgba(20, 30, 20, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.6);
+}
+
+body .lil-gui.root > .children {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding-bottom: 6px;
+}
+
+body .lil-gui.root > .children::-webkit-scrollbar-thumb {
+  background: rgba(30, 34, 30, 0.22);
+}
+
+/* Header: small, centered, spaced-out caps, with the fold arrow at the left */
+body .lil-gui.root > .title {
+  position: relative;
+  height: 32px;
+  line-height: 32px;
+  padding: 0 12px;
+  text-align: center;
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(42, 44, 42, 0.62);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.5);
+}
+
+body .lil-gui.root.closed > .title {
+  border-bottom-color: transparent;
+}
+
+body .lil-gui.root > .title::before {
+  position: absolute;
+  left: 12px;
+  color: var(--ink);
+}
+
+/* Fold arrows: solid little triangles */
+body .lil-gui .title::before {
+  content: "▼";
+  font-family: Arial, sans-serif;
+  font-size: 8px;
+  width: 14px;
+  padding-right: 0;
+  color: var(--ink);
+  vertical-align: 1px;
+}
+
+body .lil-gui.closed > .title::before {
+  content: "▶";
+}
+
+body:not(.lil-gui-dragging) .lil-gui .title:hover {
+  background: rgba(255, 255, 255, 0.18);
+  opacity: 1;
+}
+
+body .lil-gui .title:active {
+  background: rgba(255, 255, 255, 0.24);
+  opacity: 1;
+}
+
+body .lil-gui .title:focus {
+  text-decoration: none;
+}
+
+body .lil-gui .title:focus-visible {
+  box-shadow: inset 0 0 0 1px rgba(30, 34, 30, 0.35);
+}
+
+/* Sections: bold titles, separated by a pale line */
+body .lil-gui.root > .children > .lil-gui > .title {
+  height: 34px;
+  line-height: 34px;
+  padding: 0 10px;
+  border: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.55);
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #2a2c2a;
+}
+
+body .lil-gui.root > .children > .lil-gui:first-child > .title,
+body .lil-gui.root > .children > .controller + .lil-gui > .title {
+  border-top-color: rgba(255, 255, 255, 0.55);
+}
+
+/* Sub-groups: a slightly darker band, inset from the panel edge */
+body .lil-gui .lil-gui .lil-gui {
+  margin: 0 8px 4px;
+  border-radius: 6px;
+  background: rgba(30, 34, 30, 0.05);
+}
+
+body .lil-gui .lil-gui .lil-gui > .title {
+  height: 30px;
+  line-height: 30px;
+  padding: 0 8px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #2f322f;
+}
+
+body .lil-gui .lil-gui .lil-gui > .children {
+  border-left: none;
+  margin-left: 0;
+  padding-bottom: 2px;
+}
+
+body .lil-gui .lil-gui .lil-gui > .children .controller {
+  padding: 0 10px 0 14px;
+}
+
+body .lil-gui + .controller {
+  border-top: none;
+}
+
+/* Rows */
+body .lil-gui .controller {
+  margin: 4px 0;
+  min-height: 28px;
+}
+
+body .lil-gui .controller > .name {
+  color: #3b3e3b;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Values: rounded grey pills, right aligned, tabular */
+body .lil-gui input {
+  transition: background-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+body .lil-gui .controller.number input,
+body .lil-gui .controller.color input[type="text"] {
+  height: 22px;
+  padding: 0 7px;
+  border-radius: 6px;
+  background: rgba(30, 34, 30, 0.1);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: #3b3e3b;
+}
+
+body .lil-gui .controller.number input:hover,
+body .lil-gui .controller.color input[type="text"]:hover {
+  background: rgba(30, 34, 30, 0.15);
+}
+
+body .lil-gui .controller.number input:focus,
+body .lil-gui .controller.color input[type="text"]:focus {
+  background: rgba(255, 255, 255, 0.55);
+  box-shadow: inset 0 0 0 1px rgba(30, 34, 30, 0.3);
+}
+
+/* Sliders: a thin dark track and a dark capsule handle */
+body .lil-gui .controller.number .slider,
+body .lil-gui .controller.number .slider:hover,
+body .lil-gui .controller.number .slider.active {
+  display: flex;
+  align-items: center;
+  overflow: visible;
+  padding: 0 4px;
+  border-radius: 0;
+  background: linear-gradient(rgba(40, 44, 40, 0.42), rgba(40, 44, 40, 0.42)) center / calc(100% - 8px) 1.5px no-repeat;
+}
+
+body .lil-gui .controller.number .slider:hover {
+  background-image: linear-gradient(rgba(40, 44, 40, 0.6), rgba(40, 44, 40, 0.6));
+}
+
+body .lil-gui .controller.number .fill {
+  position: relative;
+  flex: none;
+  height: 1.5px;
+  border-right: none;
+  box-sizing: border-box;
+  background: transparent;
+}
+
+body .lil-gui .controller.number .fill::after {
+  content: "";
+  position: absolute;
+  right: -4.5px;
+  top: 50%;
+  width: 9px;
+  height: 18px;
+  margin-top: -9px;
+  border-radius: 5px;
+  background: #555955;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  transition: transform 0.15s ease, background-color 0.15s ease;
+}
+
+body .lil-gui .controller.number .slider:hover .fill::after {
+  background: #464a46;
+}
+
+body .lil-gui .controller.number .slider.active .fill::after {
+  background: #3a3d3a;
+  transform: scaleY(1.08);
+}
+
+/* Buttons: full-width darker pills */
+body .lil-gui button {
+  height: 28px;
+  border-radius: 8px;
+  background: rgba(55, 58, 55, 0.55);
+  border: 1px solid rgba(30, 34, 30, 0.1);
+  color: #1f211f;
+  font-weight: 700;
+  transition: background-color 0.2s ease, transform 0.15s ease;
+}
+
+body .lil-gui button:hover {
+  background: rgba(55, 58, 55, 0.68);
+  border-color: rgba(30, 34, 30, 0.14);
+}
+
+body .lil-gui button:active {
+  background: rgba(55, 58, 55, 0.78);
+  transform: scale(0.99);
+}
+
+body .lil-gui button:focus-visible {
+  border-color: rgba(30, 34, 30, 0.45);
+}
+
+/* Drop-downs: a darker pill with a solid arrow */
+body .lil-gui .controller.option .display {
+  height: 24px;
+  line-height: 24px;
+  padding-left: 0.8em;
+  border-radius: 6px;
+  background: rgba(55, 58, 55, 0.5);
+  color: #1f211f;
+  transition: background-color 0.2s ease;
+}
+
+body .lil-gui .controller.option .widget {
+  width: 100%;
+}
+
+body .lil-gui .controller.option .display {
+  width: 100%;
+}
+
+body .lil-gui .controller.option .display::after {
+  content: "▼";
+  font-family: Arial, sans-serif;
+  font-size: 8px;
+  padding-right: 0.8em;
+}
+
+body .lil-gui .controller.option .widget:hover .display {
+  background: rgba(55, 58, 55, 0.62);
+}
+
+/* Colors: a rounded swatch and its hex value */
+body .lil-gui .controller.color .display {
+  height: 18px;
+  border-radius: 5px;
+  box-shadow: inset 0 0 0 1px rgba(30, 34, 30, 0.2);
+}
+
+body .lil-gui .controller.color input[type="text"] {
+  text-transform: uppercase;
+}
+
+/* Checkboxes: a dark disc with a light tick */
+body .lil-gui input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: rgba(30, 34, 30, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(30, 34, 30, 0.28);
+}
+
+body .lil-gui input[type="checkbox"]:checked {
+  background: #4a4e4a;
+  box-shadow: none;
+  color: #eef1ee;
+}
+
+body .lil-gui input[type="checkbox"]:checked::before {
+  font-size: 11px;
+  line-height: 16px;
+}
+
+@media (max-width: 480px) {
+  body .lil-gui.root.autoPlace {
+    --width: min(280px, calc(100vw - 24px));
+    max-height: min(62dvh, calc(100dvh - 24px));
+  }
+}
+
+/* Frame rate readout, top left under the title, in the panel's frosted style */
+.fps-meter {
+  position: fixed;
+  top: max(56px, calc(env(safe-area-inset-top) + 48px));
+  left: max(10px, env(safe-area-inset-left));
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgba(228, 230, 226, 0.66);
+  -webkit-backdrop-filter: blur(10px) saturate(60%);
+  backdrop-filter: blur(10px) saturate(60%);
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  box-shadow: 0 8px 20px -10px rgba(20, 30, 20, 0.3);
+  font-family: "JetBrains Mono", ui-monospace, Consolas, monospace;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: rgba(42, 44, 42, 0.7);
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.fps-meter[hidden] {
+  display: none;
+}
+
+.fps-meter strong {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0;
+  color: #2a2c2a;
+}
+
+.fps-meter span {
+  margin-left: 4px;
+  letter-spacing: 0.02em;
+  color: rgba(42, 44, 42, 0.55);
+}

@@ -5,6 +5,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import GUI from 'three/examples/jsm/libs/lil-gui.module.min.js'
 import { createVolumetricClouds, cloudQualityPresets } from './clouds.js'
 import { createGodRays } from './godRays.js'
+import { createIntroReveal } from './intro.js'
 import { createBlackPines } from './pines.js'
 import { createBoulderGeometry, createRandom, graniteMaterial } from './rocks.js'
 
@@ -44,19 +45,31 @@ controls.target.copy(cameraStart.target)
 // than up and down, so it stays above the ground too
 controls.maxPolarAngle = Math.PI / 2
 controls.screenSpacePanning = false
+// Zoom range, as distance from the look-at point: in to a close look at the grass, out to
+// a view of the whole island with some sky around it (the starting view is 8 units out)
+controls.minDistance = 2
+controls.maxDistance = 30
 
 // Lowest the camera may go: just above the island's highest rim point (about 0.8), so the
-// rim is always seen from above, and never closer than 0.3 to the ground right under it.
+// rim is always seen from above, and never closer than 0.15 to the ground right under it.
 // Worked into the orbit limit each frame, from the current zoom, so the controls stop
 // there on their own and nothing fights them
-const cameraFloor = { rim: 1.1, clearance: 0.3 }
+const cameraFloor = { rim: 0.85, clearance: 0.15 }
 const limitCameraHeight = () => {
+  // Free camera (Grass Camera > Framing, in the panel) lifts every orbit limit
+  if (cameraSettings.freeCamera) {
+    controls.minPolarAngle = 0
+    controls.maxPolarAngle = Math.PI
+    return
+  }
+  controls.minPolarAngle = THREE.MathUtils.degToRad(cameraSettings.minPolar)
   const { x, z } = camera.position
   const overIsland = Math.abs(x) < groundSize / 2 && Math.abs(z) < groundSize / 2
   const floor = Math.max(cameraFloor.rim, overIsland ? getGroundHeight(x, z) + cameraFloor.clearance : -Infinity)
   const distance = camera.position.distanceTo(controls.target)
   const below = THREE.MathUtils.clamp((controls.target.y - floor) / Math.max(distance, 1e-3), -1, 1)
-  controls.maxPolarAngle = Math.PI / 2 + Math.asin(below)
+  // The lower of the ground limit and the panel's max polar angle
+  controls.maxPolarAngle = Math.min(Math.PI / 2 + Math.asin(below), THREE.MathUtils.degToRad(cameraSettings.maxPolar))
 }
 controls.update()
 // What controls.reset() returns to
@@ -71,7 +84,21 @@ scene.add(ambientLight)
 
 // Shared with the grass shader: how much sunlight shines through back-lit blades
 const lightingUniforms = {
-  uGrassTranslucency: { value: 1.28 },
+  uGrassTranslucency: { value: 1.5 },
+  // How much shade from rocks and trees also dims the sky light on the blades (0 = only
+  // the sun's direct light is blocked). A low sun adds little direct light to upright
+  // grass, so without this, shadows on the grass barely show
+  uGrassShade: { value: 0.55 },
+  // Grass palette: meadow green as the main color, drifting toward fresh leaf green in
+  // broad patches, some blades muted toward sage, each blade deepening to forest green low
+  // down and lightening to a restrained lime toward its tip; soft light green for the
+  // light that shines through backlit blades
+  uGrassMeadow: { value: new THREE.Color('#47752B') },
+  uGrassFresh: { value: new THREE.Color('#65943A') },
+  uGrassDeep: { value: new THREE.Color('#2F5427') },
+  uGrassLime: { value: new THREE.Color('#8EAD4B') },
+  uGrassSage: { value: new THREE.Color('#759B55') },
+  uGrassGlow: { value: new THREE.Color('#A2BC69') },
 }
 
 const directionalLight = new THREE.DirectionalLight('#ffffff', 2)
@@ -174,7 +201,9 @@ const getRollingHeight = (x, z) => {
 const getSurfaceHeight = (x, z) => getRollingHeight(x, z) * rollingStrength + terrainDome(x, z)
 
 // Biomes: every look of the field comes from these few numbers, read by both the ground
-// and the grass shaders. Pick one in the panel (or with ?biome=dry in the URL), then tweak.
+// and the grass shaders. Two presets, Healthy (the default: a lush, dense meadow) and
+// Sparse (an open landscape of irregular grass patches over bare soil). Pick one with the
+// buttons in the panel (or with ?biome=sparse in the URL), then tweak.
 // - map*: shape of the ground map (how big the patches are, how sharply they contrast,
 //   how ragged their edges are)
 // - threshold / softness: where on the mask grass gives way to soil, and how gradually
@@ -183,55 +212,40 @@ const getSurfaceHeight = (x, z) => getRollingHeight(x, z) * rollingStrength + te
 // - heightMin / heightMax: blade height on bare vs. lush ground, in world units
 // - grassTint / dryColor / dryness / biomeVariation / sparseDryness: blade colors
 // - soilTint: how much blades on thin ground take on the soil color
-// - turfColor / soilColor / soilColorAlt / soilGrain: ground palette and how mottled the
-//   soil is (color only, never density)
+// - turfColor / soilColor / soilColorAlt: ground palette
+// Patch contrast, edge detail and soil grain aren't part of a biome (see groundSettings)
 const biomePresets = {
   healthy: {
-    mapScale: 0.17, mapContrast: 1, mapDetail: 0.55, mapSeed: 1, valleyGrass: 0.1,
-    threshold: 0.5, softness: 0.16, sparseDensity: 0.1, centerGrass: 0.6,
+    mapScale: 0.17, mapSeed: 1, valleyGrass: 0.1,
+    threshold: 0.5, softness: 0.16, sparseDensity: 0.1, centerGrass: 1.2,
     heightMin: 0.06, heightMax: 0.3, heightVariation: 0.5,
     grassTint: '#ffffff', dryColor: '#b9a255', dryness: 0, biomeVariation: 0.12, sparseDryness: 0.1, soilTint: 0.75,
-    turfColor: '#5c8a0c', soilColor: '#e0b07a', soilColorAlt: '#dbab75', soilGrain: 0.03,
+    turfColor: '#5c8a0c', soilColor: '#e0b07a', soilColorAlt: '#dbab75',
   },
+  // Sparse: smaller, separate patches (higher map frequency, a higher threshold, little
+  // guaranteed grass in the middle) with almost nothing growing between them, shorter and
+  // more varied blades, and drier tufts where the grass thins out
   sparse: {
-    mapScale: 0.16, mapContrast: 1.25, mapDetail: 0.5, mapSeed: 2, valleyGrass: 0.25,
-    threshold: 0.58, softness: 0.18, sparseDensity: 0.05, centerGrass: 0.2,
-    heightMin: 0.06, heightMax: 0.34, heightVariation: 0.4,
-    grassTint: '#f2f5e6', dryColor: '#b49a58', dryness: 0.1, biomeVariation: 0.25, sparseDryness: 0.65, soilTint: 0.6,
-    turfColor: '#55802a', soilColor: '#c5a063', soilColorAlt: '#c19c5e', soilGrain: 0.03,
-  },
-  dry: {
-    mapScale: 0.12, mapContrast: 1, mapDetail: 0.5, mapSeed: 3, valleyGrass: 0.2,
-    threshold: 0.35, softness: 0.2, sparseDensity: 0.1, centerGrass: 0.3,
-    heightMin: 0.08, heightMax: 0.38, heightVariation: 0.4,
-    grassTint: '#f5ecc8', dryColor: '#c8a95c', dryness: 0.7, biomeVariation: 0.25, sparseDryness: 0.3, soilTint: 0.45,
-    turfColor: '#7b7a34', soilColor: '#8b6b44', soilColorAlt: '#a3825a', soilGrain: 0.15,
-  },
-  mixed: {
-    mapScale: 0.12, mapContrast: 1, mapDetail: 0.5, mapSeed: 4, valleyGrass: 0.15,
-    threshold: 0.32, softness: 0.16, sparseDensity: 0.1, centerGrass: 0.35,
-    heightMin: 0.1, heightMax: 0.44, heightVariation: 0.35,
-    grassTint: '#ffffff', dryColor: '#c9b052', dryness: 0.05, biomeVariation: 0.85, sparseDryness: 0.4, soilTint: 0.35,
-    turfColor: '#5a8424', soilColor: '#c5a063', soilColorAlt: '#c19c5e', soilGrain: 0.03,
-  },
-  redDesert: {
-    mapScale: 0.2, mapContrast: 1.3, mapDetail: 0.5, mapSeed: 5, valleyGrass: 0.35,
-    threshold: 0.66, softness: 0.16, sparseDensity: 0.04, centerGrass: 0.12,
-    heightMin: 0.05, heightMax: 0.3, heightVariation: 0.45,
-    grassTint: '#e9e6c0', dryColor: '#c6a362', dryness: 0.45, biomeVariation: 0.3, sparseDryness: 0.6, soilTint: 0.55,
-    turfColor: '#6f7433', soilColor: '#9a5433', soilColorAlt: '#b8754a', soilGrain: 0.15,
+    mapScale: 0.22, mapSeed: 2, valleyGrass: 0.3,
+    threshold: 0.6, softness: 0.2, sparseDensity: 0.03, centerGrass: 0.12,
+    heightMin: 0.04, heightMax: 0.3, heightVariation: 0.65,
+    grassTint: '#f2f5e6', dryColor: '#b49a58', dryness: 0.1, biomeVariation: 0.3, sparseDryness: 0.65, soilTint: 0.6,
+    turfColor: '#55802a', soilColor: '#c5a063', soilColorAlt: '#c19c5e',
   },
 }
 
 const initialBiome = new URLSearchParams(window.location.search).get('biome')
 const biomeState = { biome: initialBiome in biomePresets ? initialBiome : 'healthy' }
-// bladeWidth and rockGrass (how lush the grass is around rocks) aren't part of a biome, so
-// switching presets leaves them alone
-// The scene starts from the preset with a few values of its own on top (sharper, more
-// detailed patch edges and grainier soil); picking a preset in the panel later gives that
-// preset exactly
-const startingGround = { mapContrast: 1.8, mapDetail: 0.75, soilGrain: 0.2 }
-const groundSettings = { bladeWidth: 1.35, rockGrass: 0.55, ...biomePresets[biomeState.biome], ...startingGround }
+// Not part of a biome, so switching presets leaves them alone: blade width, how lush the
+// grass is around rocks, patch contrast, edge detail and soil grain
+const groundSettings = {
+  bladeWidth: 1.35,
+  rockGrass: 0.55,
+  mapContrast: 1.8,
+  mapDetail: 0.75,
+  soilGrain: 0.2,
+  ...biomePresets[biomeState.biome],
+}
 
 // Ground map: one procedural texture stretched once over the whole terrain and read by
 // both the ground and the grass. Its channels are deliberately independent:
@@ -985,6 +999,7 @@ bladeMaterial.onBeforeCompile = (shader) => {
       varying float vDryAmount;
       varying vec3 vBaseColor;
       varying float vBladeRandom;
+      varying float vGrassPatch;
       uniform float uBladeHeight;
       ${windShader}
       attribute vec3 aGroundNormal;
@@ -1015,13 +1030,16 @@ bladeMaterial.onBeforeCompile = (shader) => {
       vDryAmount = dryAmount(groundSample, grass);
       vBaseColor = groundColor(groundSample);
       vBladeRandom = bladeRandom;
+      // Broad patches of fresher and deeper meadow, a few meters across
+      vGrassPatch = windNoise(bladeRoot.xz * 0.32 + 71.0) * 0.65 + windNoise(bladeRoot.xz * 0.9 + 13.0) * 0.35;
 
       // Height: short on bare ground, tall in lush grass. A slow noise plus a per-blade
       // random keep blades with the same mask value from lining up into flat height bands
       float heightPatch = windNoise(bladeRoot.xz * 1.7 + 53.0) - 0.5;
       float heightBlend = clamp(grass + heightPatch * 0.5 * uHeightVariation, 0.0, 1.0);
       float bladeLength = mix(uHeightMin, uHeightMax, heightBlend);
-      bladeLength *= 1.0 + (windHash(bladeRoot.xz + 17.3) - 0.5) * uHeightVariation;
+      // Never shorter than a fifth of its length, so high variation can't shrink blades away
+      bladeLength *= max(1.0 + (windHash(bladeRoot.xz + 17.3) - 0.5) * uHeightVariation, 0.2);
       float bladeLengthScale = bladeLength / uBladeHeight;
 
       // Density, continuously: each blade has a fixed random rank and grows wherever the
@@ -1075,7 +1093,15 @@ bladeMaterial.onBeforeCompile = (shader) => {
       varying float vDryAmount;
       varying vec3 vBaseColor;
       varying float vBladeRandom;
-      uniform float uGrassTranslucency;`
+      uniform float uGrassTranslucency;
+      uniform float uGrassShade;
+      varying float vGrassPatch;
+      uniform vec3 uGrassMeadow;
+      uniform vec3 uGrassFresh;
+      uniform vec3 uGrassDeep;
+      uniform vec3 uGrassLime;
+      uniform vec3 uGrassSage;
+      uniform vec3 uGrassGlow;`
     )
     // Color: healthy blades keep their own green (times the tint), drier ones fade to
     // straw, and on thin ground they take on the soil color so stray tufts sit in the
@@ -1083,12 +1109,24 @@ bladeMaterial.onBeforeCompile = (shader) => {
     .replace(
       '#include <color_fragment>',
       `#include <color_fragment>
-      vec3 bladeColor = diffuseColor.rgb * uGrassTint;
+      // From the palette: meadow green, fresher in some patches, muted toward sage on a
+      // share of blades, deep forest green low on the blade and a little lime toward the
+      // tip. Each blade also varies a touch in brightness, so neighbors stay distinct.
+      // All smooth blends, so there are no visible bands
+      vec3 bladeColor = mix(uGrassMeadow, uGrassFresh, smoothstep(0.3, 0.75, vGrassPatch) * 0.75);
+      bladeColor = mix(bladeColor, uGrassSage, smoothstep(0.55, 0.95, fract(vBladeRandom * 7.31)) * 0.5);
+      bladeColor = mix(uGrassDeep, bladeColor, smoothstep(0.0, 0.6, vBladeHeight));
+      bladeColor = mix(bladeColor, uGrassLime, smoothstep(0.6, 1.0, vBladeHeight) * 0.4);
+      bladeColor *= 0.92 + 0.16 * fract(vBladeRandom * 3.17);
+      bladeColor *= uGrassTint;
       vec3 strawColor = uDryColor * (0.8 + 0.4 * vBladeRandom);
       bladeColor = mix(bladeColor, strawColor, vDryAmount);
       bladeColor = mix(bladeColor, vBaseColor, (1.0 - vGrassAmount) * uSoilTint);
       float bladeGradient = smoothstep(0.15, 1.0, vBladeHeight);
-      diffuseColor.rgb = mix(vBaseColor, bladeColor, bladeGradient);`
+      // The root blends into the ground under it, but on grassy ground toward the deep
+      // forest green of the palette, so the bases stay in the same green family
+      vec3 bladeBase = mix(vBaseColor, uGrassDeep, vGrassAmount * 0.7);
+      diffuseColor.rgb = mix(bladeBase, bladeColor, bladeGradient);`
     )
     // Lighting: the blade sides face sideways while the ground faces along its own
     // slope, so the same color would still shade differently. At the base, use the
@@ -1128,15 +1166,31 @@ bladeMaterial.onBeforeCompile = (shader) => {
         #endif
         vec3 sunColor = directionalLights[0].color;
         float sunLevel = dot(sunColor, vec3(0.2126, 0.7152, 0.0722));
-        vec3 sunLight = mix(vec3(sunLevel), sunColor, 0.2);
-        // Pale green: the blade's hue at full brightness, softened a little toward white
+        // The grass keeps the sun's brightness but only a part of its hue: a low sun is
+        // orange, and its full color turns the palette's greens olive
+        vec3 sunBalance = mix(vec3(1.0), vec3(sunLevel) / max(sunColor, vec3(1e-3)), 0.6);
+        reflectedLight.directDiffuse *= clamp(sunBalance, vec3(0.5), vec3(1.6));
+        // Only the sun's brightness: its hue (orange when it is low) would tint the tips
+        vec3 sunLight = vec3(sunLevel);
+        // The blade's own green at full brightness, barely softened toward white, so lit
+        // tips are the grass's natural green, just brighter (more white turns them pale)
         vec3 bladeHue = diffuseColor.rgb / max(max(diffuseColor.r, max(diffuseColor.g, diffuseColor.b)), 1e-3);
-        vec3 paleGreen = mix(bladeHue, vec3(1.0), 0.3) * 0.5;
+        // The soft light green of the palette, kept within the blade's own hue family
+        vec3 paleGreen = mix(bladeHue * 0.5, uGrassGlow * 0.62, 0.65);
         vec3 transmitted = mix(diffuseColor.rgb, paleGreen, 0.55);
         vec3 glow = sunLight * transmitted * through * tip * sunShadow * uGrassTranslucency;
         float glowPeak = max(glow.r, max(glow.g, glow.b));
-        glow *= glowPeak > 1e-4 ? 0.5 * (1.0 - exp(-glowPeak / 0.5)) / glowPeak : 1.0;
+        // Above 1.5 the ceiling rises too (gently, as a square root), so stronger settings keep
+        // brightening the tips instead of flattening against it; up to 1.5 nothing changes
+        float glowCeiling = 0.5 * sqrt(max(uGrassTranslucency / 1.5, 1.0));
+        glow *= glowPeak > 1e-4 ? glowCeiling * (1.0 - exp(-glowPeak / glowCeiling)) / glowPeak : 1.0;
         reflectedLight.directDiffuse += glow;
+        // Shade: where the shadow map says the sun is blocked, the sky light is dimmed too,
+        // in proportion. Taken from the real shadow (its shape, softness and direction), so
+        // rock and tree shadows on the grass read clearly at any sun height
+        float shaded = 1.0 - sunShadow;
+        reflectedLight.indirectDiffuse *= 1.0 - shaded * uGrassShade;
+        reflectedLight.directDiffuse *= 1.0 - shaded * uGrassShade * 0.5;
       #endif`
     )
 }
@@ -2146,6 +2200,151 @@ qualityFolder.add(performanceSettings, 'adaptive').name('Adaptive quality').onCh
 qualityFolder.add(performanceSettings, 'showFps').name('Show FPS').onChange(() => {
   fpsMeter.hidden = !performanceSettings.showFps
 })
+
+// Grass Camera: the orbit camera's settings, starting from its current behavior.
+// - Rotate speed: auto rotation, in turns per minute. Damping: how long the camera glides
+//   after a drag (higher stops sooner). Drag sensitivity: how far a drag turns it
+// - Zoom step: how far one wheel notch zooms. Zoom smoothing: how quickly the camera
+//   glides to that distance (higher is snappier)
+// - Min / max distance: the zoom range. Min / max polar: how far the camera can tilt, in
+//   degrees from straight overhead (it still never goes below the ground). Swing: how far
+//   it can orbit either side of the starting view (180 = all the way round)
+// - Framing: free camera lifts all of these limits, so the camera can go anywhere, even
+//   under the island; turning it off brings them back. Log on move prints the camera to
+//   the console whenever it comes to rest, and copy camera JSON copies it, in the same
+//   form as cameraStart at the top of this file, ready to paste in as the starting view
+const startAzimuth = Math.atan2(cameraStart.position.x - cameraStart.target.x, cameraStart.position.z - cameraStart.target.z)
+const cameraSettings = {
+  autoRotate: false,
+  rotateSpeed: 0.5,
+  damping: controls.dampingFactor,
+  dragSensitivity: controls.rotateSpeed,
+  zoomStep: controls.zoomSpeed,
+  zoomSmoothing: 8,
+  minDistance: controls.minDistance,
+  maxDistance: controls.maxDistance,
+  minPolar: 0,
+  maxPolar: 150,
+  swing: 180,
+  allowPan: true,
+  fov: camera.fov,
+  freeCamera: false,
+  logOnMove: true,
+}
+const applyCameraSettings = () => {
+  const c = cameraSettings
+  const free = c.freeCamera
+  controls.autoRotate = c.autoRotate
+  controls.autoRotateSpeed = c.rotateSpeed
+  controls.dampingFactor = c.damping
+  controls.rotateSpeed = c.dragSensitivity
+  controls.minDistance = free ? 0.2 : Math.min(c.minDistance, c.maxDistance)
+  // Free camera still stays inside the sky dome (radius 90), so the sky never disappears
+  controls.maxDistance = free ? 70 : Math.max(c.minDistance, c.maxDistance)
+  const swing = THREE.MathUtils.degToRad(c.swing)
+  controls.minAzimuthAngle = free || c.swing >= 180 ? -Infinity : startAzimuth - swing
+  controls.maxAzimuthAngle = free || c.swing >= 180 ? Infinity : startAzimuth + swing
+  controls.enablePan = c.allowPan
+  controls.screenSpacePanning = free
+  if (camera.fov !== c.fov) {
+    camera.fov = c.fov
+    camera.updateProjectionMatrix()
+  }
+  zoom.distance = THREE.MathUtils.clamp(zoom.distance, controls.minDistance, controls.maxDistance)
+}
+
+const cameraFolder = gui.addFolder('Grass Camera')
+cameraFolder.add(cameraSettings, 'autoRotate').name('Auto Rotate').onChange(applyCameraSettings)
+cameraFolder.add(cameraSettings, 'rotateSpeed', 0, 5, 0.05).name('Rotate Speed').onChange(applyCameraSettings)
+cameraFolder.add(cameraSettings, 'damping', 0.01, 0.3, 0.01).name('Damping').onChange(applyCameraSettings)
+cameraFolder.add(cameraSettings, 'dragSensitivity', 0.1, 3, 0.05).name('Drag Sensitivity').onChange(applyCameraSettings)
+cameraFolder.add(cameraSettings, 'zoomStep', 0.1, 3, 0.05).name('Zoom Step')
+cameraFolder.add(cameraSettings, 'zoomSmoothing', 1, 30, 0.5).name('Zoom Smoothing')
+cameraFolder.add(cameraSettings, 'minDistance', 0.5, 30, 0.5).name('Min Distance').onChange(applyCameraSettings)
+cameraFolder.add(cameraSettings, 'maxDistance', 5, 70, 1).name('Max Distance').onChange(applyCameraSettings)
+cameraFolder.add(cameraSettings, 'minPolar', 0, 90, 1).name('Min Polar (deg)')
+cameraFolder.add(cameraSettings, 'maxPolar', 10, 180, 1).name('Max Polar (deg)')
+cameraFolder.add(cameraSettings, 'swing', 0, 180, 1).name('Swing ± (deg)').onChange(applyCameraSettings)
+cameraFolder.add(cameraSettings, 'allowPan').name('Allow Pan').onChange(applyCameraSettings)
+cameraFolder.add(cameraSettings, 'fov', 20, 100, 1).name('FOV').onChange(applyCameraSettings)
+
+const round3 = (value) => Math.round(value * 1000) / 1000
+const cameraJson = () =>
+  JSON.stringify({
+    fov: camera.fov,
+    position: camera.position.toArray().map(round3),
+    target: controls.target.toArray().map(round3),
+  })
+const framingFolder = cameraFolder.addFolder('Framing')
+framingFolder.add(cameraSettings, 'freeCamera').name('Free Camera').onChange(applyCameraSettings)
+framingFolder.add(cameraSettings, 'logOnMove').name('Log on Move')
+const copyCameraControl = framingFolder
+  .add(
+    {
+      copy: () => {
+        const json = cameraJson()
+        const done = (label) => {
+          copyCameraControl.name(label)
+          setTimeout(() => copyCameraControl.name('Copy Camera JSON'), 1400)
+        }
+        // Clipboard API where allowed, otherwise the old select-and-copy way
+        const fallback = () => {
+          const field = document.createElement('textarea')
+          field.value = json
+          document.body.appendChild(field)
+          field.select()
+          const ok = document.execCommand('copy')
+          field.remove()
+          done(ok ? 'Copied' : 'Copy failed (see console)')
+          if (!ok) console.log(json)
+        }
+        if (navigator.clipboard?.writeText) navigator.clipboard.writeText(json).then(() => done('Copied'), fallback)
+        else fallback()
+      },
+    },
+    'copy'
+  )
+  .name('Copy Camera JSON')
+cameraFolder.close()
+
+// Log on move: once the camera has been still for a moment after moving
+let cameraLogTimer
+controls.addEventListener('change', () => {
+  if (!cameraSettings.logOnMove) return
+  clearTimeout(cameraLogTimer)
+  cameraLogTimer = setTimeout(() => console.log('camera', cameraJson()), 400)
+})
+
+// Smooth wheel zoom: the wheel sets a target distance (zoom step per notch) and the camera
+// glides to it (zoom smoothing). The wheel is taken before the orbit controls see it;
+// pinch zoom on touch screens is still theirs
+const zoom = { distance: camera.position.distanceTo(controls.target), active: false }
+const zoomOffset = new THREE.Vector3()
+window.addEventListener(
+  'wheel',
+  (event) => {
+    if (event.target !== canvas || !controls.enabled || !controls.enableZoom) return
+    event.preventDefault()
+    event.stopImmediatePropagation()
+    const notches = event.deltaY * (event.deltaMode === 1 ? 0.33 : event.deltaMode === 2 ? 1 : 0.01)
+    zoom.distance = THREE.MathUtils.clamp(zoom.distance * Math.pow(0.95, -cameraSettings.zoomStep * notches), controls.minDistance, controls.maxDistance)
+    zoom.active = true
+  },
+  { capture: true, passive: false }
+)
+const updateZoom = (delta) => {
+  zoomOffset.subVectors(camera.position, controls.target)
+  const current = zoomOffset.length()
+  // Follow the controls when something else changes the distance (pinch, reset camera)
+  if (!zoom.active) {
+    zoom.distance = current
+    return
+  }
+  const next = current + (zoom.distance - current) * (1 - Math.exp(-cameraSettings.zoomSmoothing * delta))
+  camera.position.copy(controls.target).addScaledVector(zoomOffset.normalize(), next)
+  if (Math.abs(next - zoom.distance) < 1e-3) zoom.active = false
+}
+applyCameraSettings()
 gui.add(transition, 'speed', 2, 20, 0.5).name('transition speed')
 // Back to the starting view (see cameraStart)
 gui.add({ resetCamera: () => controls.reset() }, 'resetCamera').name('reset camera')
@@ -2161,9 +2360,9 @@ const applyDistributionSettings = () => {
   densityUpdate.dirty = true
 }
 
-groundFolder
+const biomeControl = groundFolder
   .add(biomeState, 'biome', Object.keys(biomePresets))
-  .name('biome preset')
+  .name('biome')
   .onChange((biome) => {
     Object.assign(groundSettings, biomePresets[biome])
     applyGroundSettings()
@@ -2171,6 +2370,35 @@ groundFolder
     requestGroundMap()
     gui.controllersRecursive().forEach((controller) => controller.updateDisplay())
   })
+// Shown as two buttons, Healthy and Sparse, in place of the drop-down. They set the same
+// value, so switching runs the preset change above: the new ground map is built in the
+// background and crossfaded in, and colors, heights and density ease over, so the field
+// morphs from one to the other instead of popping
+const biomeButtons = document.createElement('div')
+biomeButtons.className = 'biome-buttons'
+const biomeLabels = { healthy: 'Healthy', sparse: 'Sparse' }
+for (const biome of Object.keys(biomePresets)) {
+  const button = document.createElement('button')
+  button.type = 'button'
+  button.textContent = biomeLabels[biome] ?? biome
+  button.dataset.biome = biome
+  button.addEventListener('click', () => {
+    if (biomeState.biome !== biome) biomeControl.setValue(biome)
+  })
+  biomeButtons.appendChild(button)
+}
+biomeControl.$widget.replaceChildren(biomeButtons)
+const showBiome = biomeControl.updateDisplay.bind(biomeControl)
+biomeControl.updateDisplay = () => {
+  showBiome()
+  for (const button of biomeButtons.children) {
+    const active = button.dataset.biome === biomeState.biome
+    button.classList.toggle('is-active', active)
+    button.setAttribute('aria-pressed', String(active))
+  }
+  return biomeControl
+}
+biomeControl.updateDisplay()
 
 // Black and white view of the mask on the ground, for tuning the distribution. The grass
 // sinks into the ground as the mask fades in
@@ -2183,7 +2411,7 @@ applyMaskView()
 easeUniforms(groundUniforms, maskTargets, 1)
 groundFolder.add(groundSettings, 'mapDetail', 0.3, 0.75, 0.01).name('edge detail').onChange(requestGroundMap)
 groundFolder.add(groundSettings, 'mapContrast', 0.3, 3, 0.05).name('patch contrast').onChange(requestGroundMap)
-groundFolder.add(maskView, 'show').name('show mask').onChange(applyMaskView)
+groundFolder.add(maskView, 'show').name('Show Mask').onChange(applyMaskView)
 
 // Wind controls (strength is above, with the key grass controls)
 const windFolder = groundFolder.addFolder('Wind')
@@ -2197,15 +2425,14 @@ distributionFolder.add(groundSettings, 'mapScale', 0.03, 0.5, 0.005).name('patch
 distributionFolder.add(groundSettings, 'valleyGrass', -1, 1, 0.05).name('valley grass').onChange(requestGroundMap)
 distributionFolder.add(groundSettings, 'mapSeed', 0, 100, 1).name('seed').onChange(requestGroundMap)
 distributionFolder.add(groundSettings, 'rockGrass', 0, 1, 0.01).name('grass around rocks').onChange(requestGroundMap)
-distributionFolder.add(groundSettings, 'centerGrass', 0, 1, 0.01).name('center grass').onChange(requestGroundMap)
-distributionFolder.add(groundSettings, 'threshold', 0, 1, 0.01).onChange(applyDistributionSettings)
+distributionFolder.add(groundSettings, 'centerGrass', 0, 1.5, 0.01).name('center grass').onChange(requestGroundMap)
 distributionFolder.add(groundSettings, 'softness', 0.01, 0.5, 0.01).onChange(applyDistributionSettings)
 distributionFolder.add(groundSettings, 'sparseDensity', 0, 1, 0.01).name('sparse density').onChange(applyDistributionSettings)
 
 const heightFolder = groundFolder.addFolder('Blade shape')
 heightFolder.add(groundSettings, 'heightMin', 0.01, 0.6, 0.01).name('min height').onChange(applyGroundSettings)
 heightFolder.add(groundSettings, 'heightMax', 0.05, 1, 0.01).name('max height').onChange(applyGroundSettings)
-heightFolder.add(groundSettings, 'heightVariation', 0, 1, 0.01).name('variation').onChange(applyGroundSettings)
+heightFolder.add(groundSettings, 'heightVariation', 0, 2, 0.01).name('variation').onChange(applyGroundSettings)
 heightFolder.add(groundSettings, 'bladeWidth', 0.2, 3, 0.05).name('width').onChange(applyGroundSettings)
 
 const grassColorFolder = groundFolder.addFolder('Grass color')
@@ -2256,6 +2483,7 @@ const lightSettings = {
   shadowSoftness: sunShadow.radius,
   shadowStrength: sunShadow.intensity,
   grassTranslucency: lightingUniforms.uGrassTranslucency.value,
+  grassShade: lightingUniforms.uGrassShade.value,
   godRays: 0.6,
   rayLength: 0.9,
 }
@@ -2268,13 +2496,20 @@ lightFolder.add(lightSettings, 'discSize', 0.3, 4, 0.05).name('disc size')
 lightFolder.add(lightSettings, 'ambient', 0, 1, 0.01).name('ambient fill')
 lightFolder.add(lightSettings, 'shadowSoftness', 0, 12, 0.5).name('shadow softness')
 lightFolder.add(lightSettings, 'shadowStrength', 0, 1, 0.01).name('shadow strength')
+lightFolder.add(lightSettings, 'grassShade', 0, 1, 0.01).name('shade on grass')
 // Translucency belongs with the key grass controls; it is added here, where its setting
 // exists, and moved up to sit after wind strength
-const translucencyControl = groundFolder.add(lightSettings, 'grassTranslucency', 0, 1.5, 0.01).name('translucency')
+const translucencyControl = groundFolder.add(lightSettings, 'grassTranslucency', 0, 3, 0.01).name('translucency')
 groundFolder.$children.insertBefore(translucencyControl.domElement, groundFolder.controllers[1].domElement)
 // The biome preset follows the four key controls, just above "show mask"
-const [, biomeControl, , , maskControl] = groundFolder.controllers
+const maskControl = groundFolder.controllers[4]
 groundFolder.$children.insertBefore(biomeControl.domElement, maskControl.domElement)
+// Mask Value: the mask's cutoff (the biome's threshold): grass grows where the mask is
+// above it, over a soft band either side (softness). Higher means less grass. It eases
+// in place on the GPU, and Show Mask displays the same cutoff, so the two always agree
+const maskValueControl = groundFolder.add(groundSettings, 'threshold', 0, 1, 0.01).name('Mask Value').onChange(applyDistributionSettings)
+maskValueControl.domElement.title = 'Mask cutoff: grass grows where the mask is above it (higher = less grass)'
+groundFolder.$children.insertBefore(maskValueControl.domElement, maskControl.domElement.nextSibling)
 lightFolder.add(lightSettings, 'godRays', 0, 2, 0.01).name('god rays')
 lightFolder.add(lightSettings, 'rayLength', 0.2, 1, 0.01).name('ray length')
 lightFolder.close()
@@ -2326,6 +2561,8 @@ const updateSun = (alpha) => {
 
   const grass = lightingUniforms.uGrassTranslucency
   grass.value += (lightSettings.grassTranslucency - grass.value) * alpha
+  const grassShade = lightingUniforms.uGrassShade
+  grassShade.value += (lightSettings.grassShade - grassShade.value) * alpha
   godRays.strength += (lightSettings.godRays - godRays.strength) * alpha
   godRays.length += (lightSettings.rayLength - godRays.length) * alpha
   // Rays take the sun's current color and strength (before cloud shade: the clouds
@@ -2584,6 +2821,11 @@ const updatePerformance = (realDelta) => {
   }
 }
 
+// Intro reveal (see intro.js): the landscape opens up through an organic gap in an
+// off-white veil once the first frames are drawn. loadingTime is how long the "Loading"
+// text shows (seconds from the start of the page load), duration the reveal time
+const intro = createIntroReveal(renderer, { controls, duration: 3, loadingTime: 2.5 })
+
 const tick = (timestamp) => {
   timer.update(timestamp)
   // Capped so returning to a background tab doesn't jump every transition to its end
@@ -2618,8 +2860,10 @@ const tick = (timestamp) => {
   // One shared clock drives the wind field for every blade
   windUniforms.uTime.value = timer.getElapsed()
 
+  updateZoom(delta)
   limitCameraHeight()
-  controls.update()
+  // Given the frame time, so auto rotation turns at the same speed at any frame rate
+  controls.update(delta)
   // March this frame's clouds from where the camera now is, then draw the scene with the
   // sky dome (which follows the camera so it never gets clipped) laying them over the sky,
   // through the god rays pass to the canvas
@@ -2629,6 +2873,8 @@ const tick = (timestamp) => {
   godRays.render(scene, camera, clouds.texture)
   // Frame rate readout and adaptive quality, from the real (uncapped) frame time
   updatePerformance(timer.getDelta())
+  // The intro veil, drawn over the finished frame until the reveal is done
+  intro.render(timer.getDelta())
 
   window.requestAnimationFrame(tick)
 }

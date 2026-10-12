@@ -25,6 +25,11 @@ html, body {
   pointer-events: none;
 }
 
+/* Heading: Scoutie Sans */
+.main h1 {
+  font-family: "Scoutie Sans", sans-serif;
+}
+
 /* ------------------------------------------------------------------------------------
    Control panel (lil-gui), restyled as a light frosted-glass panel at the top right:
    monospace type, dark grey text, sub-groups in slightly darker bands, thin slider
@@ -410,4 +415,131 @@ body .lil-gui input[type="checkbox"]:checked::before {
   margin-left: 4px;
   letter-spacing: 0.02em;
   color: rgba(42, 44, 42, 0.55);
+}
+
+/* Intro (see src/intro.js): an off-white cover until the first frames are drawn, and the
+   page's UI held back until the reveal has finished */
+.intro-cover {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  background: #f6f4ed;
+  pointer-events: none;
+  transition: opacity 0.6s ease;
+  /* If the scene never starts, the cover still fades away on its own */
+  animation: intro-cover-fallback 0.8s ease 8s forwards;
+}
+
+.intro-cover.is-hidden {
+  opacity: 0;
+}
+
+@keyframes intro-cover-fallback {
+  to {
+    opacity: 0;
+  }
+}
+
+.main,
+.lil-gui.root,
+.fps-meter {
+  transition: opacity 0.5s ease;
+}
+
+body.intro-active .main,
+body.intro-active .lil-gui.root,
+body.intro-active .fps-meter {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Biome preset buttons in the panel (Grass > biome): two pills, the chosen one darker */
+body .lil-gui .biome-buttons {
+  display: flex;
+  gap: 4px;
+  width: 100%;
+}
+
+body .lil-gui .biome-buttons button {
+  flex: 1;
+  height: 24px;
+  border-radius: 6px;
+  background: rgba(30, 34, 30, 0.08);
+  border: 1px solid rgba(30, 34, 30, 0.1);
+  color: #3b3e3b;
+  font-weight: 500;
+}
+
+body .lil-gui .biome-buttons button:hover {
+  background: rgba(30, 34, 30, 0.14);
+}
+
+body .lil-gui .biome-buttons button.is-active {
+  background: rgba(55, 58, 55, 0.72);
+  border-color: rgba(30, 34, 30, 0.2);
+  color: #f2f4f1;
+  font-weight: 700;
+}
+
+/* "Loading" on the off-white intro screen (see src/intro.js), in the heading's font,
+   with three dots that rise and brighten one after another */
+.intro-loading {
+  position: fixed;
+  inset: 0;
+  z-index: 2001;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: "Scoutie Sans", sans-serif;
+  font-size: clamp(44px, 9vw, 128px);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: rgba(34, 36, 34, 0.86);
+  pointer-events: none;
+  transition: opacity 0.6s ease, transform 0.6s ease;
+  /* If the scene never starts, the text fades with the cover's own fallback */
+  animation: intro-cover-fallback 0.8s ease 8s forwards;
+}
+
+.intro-loading.is-hidden {
+  opacity: 0;
+  transform: scale(0.98);
+}
+
+.intro-dots {
+  display: inline-flex;
+  margin-left: 0.04em;
+}
+
+.intro-dots span {
+  display: inline-block;
+  animation: intro-dot 1.2s ease-in-out infinite;
+}
+
+.intro-dots span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.intro-dots span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes intro-dot {
+  0%,
+  60%,
+  100% {
+    opacity: 0.25;
+    transform: translateY(0);
+  }
+  30% {
+    opacity: 1;
+    transform: translateY(-0.12em);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .intro-dots span {
+    animation: none;
+    opacity: 0.7;
+  }
 }

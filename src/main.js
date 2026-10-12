@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { ImprovedNoise } from 'three/examples/jsm/math/ImprovedNoise.js'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import GUI from 'three/examples/jsm/libs/lil-gui.module.min.js'
 import { createVolumetricClouds, cloudQualityPresets } from './clouds.js'
 import { createGodRays } from './godRays.js'
@@ -683,12 +684,74 @@ const createRock = (hasChunk) => {
   return rock
 }
 
-const rocks = rockLayout.map(({ x, z, size, turn = 0 }) => {
+// The rocks themselves come from a scanned model (public/model/rocks.glb: five stones
+// sharing one textured material). Each procedural rock above is built only as a guide to
+// where its stone goes: one of the model's stones is fitted into the space it fills (same
+// center, footprint, turn and depth in the ground), then replaces it. The largest, most
+// detailed stone is the dominant boulder; the others are shared among the rest, each
+// turned its own way so repeats don't show. Loaded before the scene is built (the intro's
+// off-white cover hides the wait), since the grass, flowers and shadows are worked out
+// from the rocks' real shapes
+const rockModel = await new GLTFLoader().loadAsync('/model/rocks.glb')
+rockModel.scene.updateMatrixWorld(true)
+// Each stone's geometry, with any transforms inside the file baked in, centered on its
+// footprint and resting at y = 0, smallest first
+const rockShapes = []
+rockModel.scene.traverse((child) => {
+  if (!child.isMesh) return
+  const geometry = child.geometry.clone().applyMatrix4(child.matrixWorld)
+  geometry.computeBoundingBox()
+  const box = geometry.boundingBox
+  const center = box.getCenter(new THREE.Vector3())
+  geometry.translate(-center.x, -box.min.y, -center.z)
+  geometry.computeBoundingBox()
+  rockShapes.push({ geometry, material: child.material, size: box.getSize(new THREE.Vector3()) })
+})
+rockShapes.sort((a, b) => a.size.x * a.size.z - b.size.x * b.size.z)
+// Which stone goes where: the largest for the dominant boulder (layout index 6), the
+// others in turn
+const rockShapeFor = (index, count) => (index === 6 ? count - 1 : index % (count - 1))
+
+const guideBox = new THREE.Box3()
+const childBox = new THREE.Box3()
+const fitRockModel = (rock, index) => {
+  // The guide's extent in its own space (its scale and turn stay on the group)
+  guideBox.makeEmpty()
+  for (const child of rock.children) {
+    child.updateMatrix()
+    child.geometry.computeBoundingBox()
+    guideBox.union(childBox.copy(child.geometry.boundingBox).applyMatrix4(child.matrix))
+  }
+  const guideSize = guideBox.getSize(new THREE.Vector3())
+  const guideCenter = guideBox.getCenter(new THREE.Vector3())
+  const shape = rockShapes[rockShapeFor(index, rockShapes.length)]
+  // Lay the stone's long side along the guide's long side
+  const stoneLong = shape.size.x >= shape.size.z
+  const guideLong = guideSize.x >= guideSize.z
+  const turn = stoneLong === guideLong ? 0 : Math.PI / 2
+  const stoneX = turn ? shape.size.z : shape.size.x
+  const stoneZ = turn ? shape.size.x : shape.size.z
+  // One scale for all three axes (so the stone keeps its own proportions), filling the
+  // guide's footprint
+  const scale = Math.sqrt((guideSize.x / stoneX) * (guideSize.z / stoneZ))
+  const stone = new THREE.Mesh(shape.geometry, shape.material)
+  stone.scale.setScalar(scale)
+  // Each reuse of a stone faces a different way (a half turn keeps the fit)
+  stone.rotation.y = turn + (Math.floor(index / (rockShapes.length - 1)) % 2) * Math.PI
+  // Same center, and its base as deep in the ground as the guide's
+  stone.position.set(guideCenter.x, guideBox.min.y, guideCenter.z)
+  rock.children.forEach((child) => child.geometry.dispose())
+  rock.clear()
+  rock.add(stone)
+}
+
+const rocks = rockLayout.map(({ x, z, size, turn = 0 }, index) => {
   const rock = createRock(size >= 0.5)
   rock.scale.setScalar(size * rockScale)
   rock.rotation.set((rockRandom() - 0.5) * 0.2, rockRandom() * Math.PI * 2 + turn, (rockRandom() - 0.5) * 0.2)
   // Sink each rock partly into the ground so it looks settled, not placed on top
   rock.position.set(x, getGroundHeight(x, z) + size * rockScale * 0.15, z)
+  fitRockModel(rock, index)
   setShadows(rock, true, true)
   scene.add(rock)
   return rock
@@ -2411,7 +2474,8 @@ applyMaskView()
 easeUniforms(groundUniforms, maskTargets, 1)
 groundFolder.add(groundSettings, 'mapDetail', 0.3, 0.75, 0.01).name('edge detail').onChange(requestGroundMap)
 groundFolder.add(groundSettings, 'mapContrast', 0.3, 3, 0.05).name('patch contrast').onChange(requestGroundMap)
-groundFolder.add(maskView, 'show').name('Show Mask').onChange(applyMaskView)
+// Show Mask: kept for debugging but hidden from the panel (?mask in the URL still turns it on)
+groundFolder.add(maskView, 'show').name('Show Mask').onChange(applyMaskView).hide()
 
 // Wind controls (strength is above, with the key grass controls)
 const windFolder = groundFolder.addFolder('Wind')

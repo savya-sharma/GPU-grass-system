@@ -1215,6 +1215,17 @@ bladeMaterial.onBeforeCompile = (shader) => {
     //   orange sun doesn't turn the tips orange
     // - The added light rolls off smoothly, scaled equally in every channel, so bright tips
     //   never clip (clipping maxes out green first and skews the color toward yellow-white)
+    // The sun's shadow, looked up once: three.js's own light loop keeps the value it
+    // computes in grassSunShadow, and the translucency and shade below reuse it (the
+    // filtered lookup is many texture reads, so a second one costs a lot on every blade)
+    .replace(
+      '#include <lights_fragment_begin>',
+      `float grassSunShadow = 1.0;
+      ${THREE.ShaderChunk.lights_fragment_begin.replace(
+        'directLight.color *= ( directLight.visible && receiveShadow ) ? getShadow( directionalShadowMap[ i ], directionalLightShadow.shadowMapSize, directionalLightShadow.shadowIntensity, directionalLightShadow.shadowBias, directionalLightShadow.shadowRadius, vDirectionalShadowCoord[ i ] ) : 1.0;',
+        'grassSunShadow = ( directLight.visible && receiveShadow ) ? getShadow( directionalShadowMap[ i ], directionalLightShadow.shadowMapSize, directionalLightShadow.shadowIntensity, directionalLightShadow.shadowBias, directionalLightShadow.shadowRadius, vDirectionalShadowCoord[ i ] ) : 1.0;\n\t\tdirectLight.color *= grassSunShadow;'
+      )}`
+    )
     .replace(
       '#include <lights_fragment_end>',
       `#include <lights_fragment_end>
@@ -1223,10 +1234,7 @@ bladeMaterial.onBeforeCompile = (shader) => {
         float facing = saturate(dot(toSun, -geometryViewDir));
         float through = 1.2 * pow(facing, 12.0) + 0.18 * pow(facing, 3.0) + 0.12 * saturate(dot(-normal, toSun));
         float tip = bladeGradient * (0.15 + 0.85 * smoothstep(0.3, 1.0, vBladeHeight));
-        float sunShadow = 1.0;
-        #if defined(USE_SHADOWMAP) && NUM_DIR_LIGHT_SHADOWS > 0
-          sunShadow = receiveShadow ? getShadow(directionalShadowMap[0], directionalLightShadows[0].shadowMapSize, directionalLightShadows[0].shadowIntensity, directionalLightShadows[0].shadowBias, directionalLightShadows[0].shadowRadius, vDirectionalShadowCoord[0]) : 1.0;
-        #endif
+        float sunShadow = grassSunShadow;
         vec3 sunColor = directionalLights[0].color;
         float sunLevel = dot(sunColor, vec3(0.2126, 0.7152, 0.0722));
         // The grass keeps the sun's brightness but only a part of its hue: a low sun is
